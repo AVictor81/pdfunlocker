@@ -25,23 +25,31 @@ CURRENCY_MAP = {
     "RUSSIAN RUBLES": "RUR"
 }
 
-def extract_text_from_pdf(file_bytes: bytes, password: str | None = None) -> str:
+def extract_text_from_pdf(file_bytes: bytes, passwords: list[str]) -> str:
+    # Пробуем без пароля
     try:
-        if password:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        full_text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+        return full_text
+    except Exception:
+        pass
+
+    # Пробуем со всеми паролями
+    for password in passwords:
+        try:
             with pikepdf.open(BytesIO(file_bytes), password=password) as pdf:
                 output = BytesIO()
                 pdf.save(output)
                 output.seek(0)
                 doc = fitz.open(stream=output.read(), filetype="pdf")
-        else:
-            doc = fitz.open(stream=file_bytes, filetype="pdf")
+                full_text = "\n".join(page.get_text() for page in doc)
+                doc.close()
+                return full_text
+        except Exception:
+            continue
 
-        full_text = "\n".join(page.get_text() for page in doc)
-        doc.close()
-        return full_text
-
-    except Exception as e:
-        return f"ERROR: {str(e)}"
+    return "ERROR: Failed to open PDF with provided passwords"
 
 
 def parse_info(text: str):
@@ -68,13 +76,13 @@ def parse_info(text: str):
 
 
 @app.post("/extract-info")
-async def extract_info(file: UploadFile = File(...), password: str = Form(None)):
+async def extract_info(file: UploadFile = File(...), passwords: str = Form(None)):
     file_bytes = await file.read()
-    text = extract_text_from_pdf(file_bytes, password=password)
+    password_list = [p.strip() for p in passwords.split(",")] if passwords else []
+    text = extract_text_from_pdf(file_bytes, password_list)
 
     if text.startswith("ERROR:"):
         return JSONResponse(status_code=400, content={"error": text})
 
     info = parse_info(text)
     return info
-
