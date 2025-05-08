@@ -26,16 +26,7 @@ CURRENCY_MAP = {
 }
 
 def extract_text_from_pdf(file_bytes: bytes, passwords: list[str]) -> str:
-    # Пробуем без пароля
-    try:
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        full_text = "\n".join(page.get_text() for page in doc)
-        doc.close()
-        return full_text
-    except Exception:
-        pass
-
-    # Пробуем со всеми паролями
+    # Пробуем все пароли сначала
     for password in passwords:
         try:
             with pikepdf.open(BytesIO(file_bytes), password=password) as pdf:
@@ -49,7 +40,14 @@ def extract_text_from_pdf(file_bytes: bytes, passwords: list[str]) -> str:
         except Exception:
             continue
 
-    return "ERROR: Failed to open PDF with provided passwords"
+    # Если пароли не помогли — пробуем без пароля в явном виде
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        full_text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+        return full_text
+    except Exception:
+        return "ERROR: Failed to open PDF with provided passwords"
 
 
 def parse_info(text: str):
