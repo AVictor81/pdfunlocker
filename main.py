@@ -21,7 +21,8 @@ CURRENCY_MAP = {
     "EURO": "EUR",
     "UAE DIRHAM": "AED",
     "QATARI RIYAL": "QAR",
-    "SWISS FRANCS": "CHF"
+    "SWISS FRANCS": "CHF",
+    "RUSSIAN RUBLES": "RUR"
 }
 
 def extract_text_from_pdf(file_bytes: bytes, password: str | None = None) -> str:
@@ -44,21 +45,15 @@ def extract_text_from_pdf(file_bytes: bytes, password: str | None = None) -> str
 
 
 def parse_info(text: str):
-    company_full = company_code = account = period = currency_code = None
+    company_full = company_code = currency_code = None
+    best_position = len(text)
 
     for name, code in COMPANY_MAP.items():
-        if name in text:
+        pos = text.find(name)
+        if 0 <= pos < best_position:
+            best_position = pos
             company_full = name
             company_code = code
-            break
-
-    account_match = re.search(r"40817\d{11}", text)
-    if account_match:
-        account = account_match.group(0)
-
-    period_match = re.search(r"\b(0[1-9]|1[0-2])\.20\d{2}\b", text)
-    if period_match:
-        period = period_match.group(0)
 
     currency_match = re.search(r"Currency\s*[:\-]?\s*([A-Z ]+)", text)
     if currency_match:
@@ -67,8 +62,6 @@ def parse_info(text: str):
 
     return {
         "company": company_code,
-        "account": account,
-        "period": period,
         "currency": currency_code,
         "raw": text[:500]
     }
@@ -84,3 +77,4 @@ async def extract_info(file: UploadFile = File(...), password: str = Form(None))
 
     info = parse_info(text)
     return info
+
