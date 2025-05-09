@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 import pikepdf
 from io import BytesIO
@@ -31,6 +31,7 @@ CURRENCY_MAP = {
     "RUSSIAN RUBLES": "RUR"
 }
 
+
 def extract_text_and_unlocked_pdf(file_bytes: bytes, passwords: list[str]) -> tuple[str, bytes]:
     for password in passwords:
         try:
@@ -45,6 +46,7 @@ def extract_text_and_unlocked_pdf(file_bytes: bytes, passwords: list[str]) -> tu
         except Exception:
             continue
 
+    # Если не удалось снять защиту — пробуем открыть как обычный PDF
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         full_text = "\n".join(page.get_text() for page in doc)
@@ -52,6 +54,7 @@ def extract_text_and_unlocked_pdf(file_bytes: bytes, passwords: list[str]) -> tu
         return full_text, file_bytes
     except Exception:
         return "ERROR: Failed to open PDF with provided passwords", b""
+
 
 def parse_info(text: str):
     company_full = company_code = currency_code = None
@@ -79,36 +82,21 @@ def parse_info(text: str):
 
 @app.post("/extract-info")
 async def extract_info(file: UploadFile = File(...)):
-
     contents = await file.read()
 
-    # Пароли, которые пробуем
     passwords = ["1234", "12345", "0000", "1111", ""]
 
-    extracted_text = None
-    decrypted_pdf_bytes = None
+    text, unlocked_pdf = extract_text_and_unlocked_pdf(contents, passwords)
 
-    for password in passwords:
-        try:
-            decrypted_pdf_bytes = unlock_pdf_from_bytes(contents, password)
-            if decrypted_pdf_bytes:
-                extracted_text = extract_text_from_pdf(decrypted_pdf_bytes)
-                break
-        except Exception as e:
-            continue
+    if not unlocked_pdf:
+        raise HTTPException(status_code=400, detail="Failed to unlock PDF with provided passwords.")
 
-    if not decrypted_pdf_bytes:
-        raise HTTPException(status_code=400, detail="Failed to unlock PDF with known passwords.")
+    parsed = parse_info(text)
 
-    # Извлекаем company и currency
-    company = extract_company(extracted_text)
-    currency = extract_currency(extracted_text)
-
-    # Конвертируем PDF в base64
-    pdf_base64 = base64.b64encode(decrypted_pdf_bytes).decode('utf-8')
+    pdf_base64 = base64.b64encode(unlocked_pdf).decode("utf-8")
 
     return {
-        "company": company,
-        "currency": currency,
+        "company": parsed["company"],
+        "currency": parsed["currency"],
         "pdf_base64": pdf_base64
     }
