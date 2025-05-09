@@ -4,6 +4,7 @@ import pikepdf
 from io import BytesIO
 import re
 import fitz  # PyMuPDF
+import base64
 
 app = FastAPI()
 
