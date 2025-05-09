@@ -20,6 +20,7 @@ CURRENCY_MAP = {
     "US DOLLARS": "USD",
     "EURO": "EUR",
     "UAE DIRHAM": "AED",
+    "ARAB EMIRATES DIRHAMS": "AED",
     "QATARI RIYAL": "QAR",
     "SWISS FRANCS": "CHF",
     "RUSSIAN RUBLES": "RUR"
