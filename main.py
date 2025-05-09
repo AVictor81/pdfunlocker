@@ -13,7 +13,8 @@ COMPANY_MAP = {
     "SOLAR GENERATION POWER LLC": "SG",
     "ECO ENERGY POWER LLC": "Eco",
     "ENERGOEFFECT POWER LLC": "EF",
-    "SOLIS POTENTIA HOLDING LLC": "SPH"
+    "SOLIS POTENTIA HOLDING LLC": "SPH",
+    "Terawatt power LLC": "SPH"
 }
 
 # Словарь соответствия валют
@@ -23,6 +24,7 @@ CURRENCY_MAP = {
     "EURO": "EUR",
     "UAE DIRHAM": "AED",
     "ARAB EMIRATES DIRHAMS": "AED",
+    "QAR": "QAR",
     "QATARI RIYAL": "QAR",
     "SWISS FRANCS": "CHF",
     "CHINESE YUAN RENMINBI": "CNY",
