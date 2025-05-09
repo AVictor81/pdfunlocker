@@ -121,7 +121,6 @@ async def extract_info(
         "company": info["company"],
         "currency": info["currency"],
         "raw": info["raw"],
-        "pdf_base64": base64.b64encode(pdf_bytes).decode("utf-8")
     }
 
 
@@ -131,17 +130,20 @@ async def extract_pdf(
     passwords: str = Form(None)
 ):
     """
-    Unlock the uploaded PDF using provided passwords and return the
-    unlocked PDF as an application/pdf response for download.
+    Attempt to unlock the uploaded PDF using a list of passwords.
+    Return the unlocked PDF file directly.
     """
     data = await file.read()
     pw_list = [p.strip() for p in passwords.split(",")] if passwords else []
+
     txt, pdf_bytes = extract_text_and_unlocked_pdf(data, pw_list)
     if txt.startswith("ERROR:"):
-        raise HTTPException(status_code=400, detail=txt)
+        return JSONResponse(status_code=400, content={"error": txt})
 
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=unlocked.pdf"}
+    output_stream = BytesIO(pdf_bytes)
+    output_stream.seek(0)
+    return StreamingResponse(
+        output_stream,
+        media_type='application/pdf',
+        headers={"Content-Disposition": f"attachment; filename=unlocked_{file.filename}"}
     )
