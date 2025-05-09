@@ -87,7 +87,6 @@ async def extract_info(file: UploadFile = File(...), passwords: str = Form(None)
         return JSONResponse(status_code=400, content={"error": text})
 
     info = parse_info(text)
-    # Если захочешь вернуть base64 версию PDF — раскомментируй строку ниже
-    # info["base64_pdf"] = base64.b64encode(file_bytes).decode("utf-8")
+    info["base64_pdf"] = base64.b64encode(file_bytes).decode("utf-8")
     return info
 
