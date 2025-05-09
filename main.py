@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response, JSONResponse
 import pikepdf
 from io import BytesIO
@@ -7,7 +7,6 @@ import fitz  # PyMuPDF
 
 app = FastAPI()
 
-# Словарь соответствия компаний и сокращений
 COMPANY_MAP = {
     "SOLAR GENERATION POWER LLC": "SG",
     "ECO ENERGY POWER LLC": "Eco",
@@ -16,7 +15,6 @@ COMPANY_MAP = {
     "TERAWATT POWER LLC": "SPH",
 }
 
-# Словарь соответствия валют
 CURRENCY_MAP = {
     "US DOLLARS": "USD",
     "US DOLLAR": "USD",
@@ -45,7 +43,7 @@ def extract_text_and_pdf_bytes(file_bytes: bytes, passwords: list[str]) -> tuple
         except Exception:
             continue
 
-    # 2) Если ни один пароль не подошёл — открываем «как есть»
+    # 2) Открываем «как есть», если ни один пароль не подошёл
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         txt = "\n".join(page.get_text() for page in doc)
@@ -56,7 +54,8 @@ def extract_text_and_pdf_bytes(file_bytes: bytes, passwords: list[str]) -> tuple
 
 def parse_info(text: str) -> dict:
     best = len(text)
-    company_code = currency_code = None
+    company_code = ""
+    currency_code = ""
     ut = text.upper()
 
     for name, code in COMPANY_MAP.items():
@@ -70,10 +69,7 @@ def parse_info(text: str) -> dict:
         cur = m.group(1).strip().upper()
         currency_code = CURRENCY_MAP.get(cur, cur)
 
-    return {
-        "company": company_code or "",
-        "currency": currency_code or "",
-    }
+    return {"company": company_code, "currency": currency_code}
 
 @app.post("/extract-info")
 async def extract_info(
@@ -82,20 +78,21 @@ async def extract_info(
 ):
     fb = await file.read()
     pw_list = [p.strip() for p in passwords.split(",")] if passwords else []
-
-    text, pdf_bytes = extract_text_and_pdf_bytes(fb, pw_list)
-    if not pdf_bytes:
-        return JSONResponse(status_code=400, content={"error": "Failed to open PDF with provided passwords."})
-
+    text, _ = extract_text_and_pdf_bytes(fb, pw_list)
+    if not text:
+        raise HTTPException(status_code=400, detail="Не удалось открыть PDF")
     info = parse_info(text)
+    return JSONResponse(status_code=200, content=info)
 
-    # Возвращаем распароленный PDF вместе с нужными заголовками
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={
-            "x-company-code": info["company"],
-            "x-currency-code": info["currency"],
-        }
-    )
+@app.post("/extract-pdf")
+async def extract_pdf(
+    file: UploadFile = File(...),
+    passwords: str = Form(None)
+):
+    fb = await file.read()
+    pw_list = [p.strip() for p in passwords.split(",")] if passwords else []
+    _, pdf_bytes = extract_text_and_pdf_bytes(fb, pw_list)
+    if not pdf_bytes:
+        raise HTTPException(status_code=400, detail="Не удалось открыть PDF")
+    return Response(content=pdf_bytes, media_type="application/pdf")
 
