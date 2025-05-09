@@ -1,10 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import pikepdf
 from io import BytesIO
 import re
 import fitz  # PyMuPDF
-import base64
 
 app = FastAPI()
 
@@ -31,18 +30,19 @@ CURRENCY_MAP = {
     "RUSSIAN RUBLES": "RUR"
 }
 
-def extract_text_from_pdf(file_bytes: bytes, passwords: list[str]) -> str:
+def extract_text_from_pdf(file_bytes: bytes, passwords: list[str]) -> tuple[str, bytes]:
     # Пробуем все пароли сначала
     for password in passwords:
         try:
             with pikepdf.open(BytesIO(file_bytes), password=password) as pdf:
                 output = BytesIO()
                 pdf.save(output)
-                output.seek(0)
-                doc = fitz.open(stream=output.read(), filetype="pdf")
+                unlocked_pdf = output.getvalue()
+                # извлекаем текст из уже разблокированного PDF
+                doc = fitz.open(stream=unlocked_pdf, filetype="pdf")
                 full_text = "\n".join(page.get_text() for page in doc)
                 doc.close()
-                return full_text
+                return full_text, unlocked_pdf
         except Exception:
             continue
 
@@ -51,14 +51,12 @@ def extract_text_from_pdf(file_bytes: bytes, passwords: list[str]) -> str:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         full_text = "\n".join(page.get_text() for page in doc)
         doc.close()
-        return full_text
+        return full_text, file_bytes
     except Exception:
-        return "ERROR: Failed to open PDF with provided passwords"
+        return "ERROR: Failed to open PDF with provided passwords", b""
 
 def parse_info(text: str):
-    company_full = None
-    company_code = None
-    currency_code = None
+    company_full = company_code = currency_code = None
     best_position = len(text)
     upper_text = text.upper()
 
@@ -84,11 +82,16 @@ def parse_info(text: str):
 async def extract_info(file: UploadFile = File(...), passwords: str = Form(None)):
     file_bytes = await file.read()
     password_list = [p.strip() for p in passwords.split(",")] if passwords else []
-    text = extract_text_from_pdf(file_bytes, password_list)
+    text, unlocked_pdf = extract_text_from_pdf(file_bytes, password_list)
 
     if text.startswith("ERROR:"):
         return JSONResponse(status_code=400, content={"error": text})
 
-    info = parse_info(text)
-    info["file_bytes"] = file_bytes
-    return info
+    # парсим инфу (если нужно где-то использовать)
+    _ = parse_info(text)
+
+    # возвращаем сам PDF-файл
+    headers = {
+        "Content-Disposition": 'attachment; filename="extracted.pdf"'
+    }
+    return StreamingResponse(BytesIO(unlocked_pdf), media_type="application/pdf", headers=headers)
