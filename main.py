@@ -96,7 +96,8 @@ async def extract_info(file: UploadFile = File(...)):
     pdf_base64 = base64.b64encode(unlocked_pdf).decode("utf-8")
 
     return {
-        "company": parsed["company"],
-        "currency": parsed["currency"],
-        "pdf_base64": pdf_base64
-    }
+    "company": company,
+    "currency": currency,
+    "pdf_base64": pdf_base64,
+    "raw": extracted_text[:1000]  # можно больше, если нужно
+}
