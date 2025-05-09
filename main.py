@@ -46,7 +46,6 @@ def extract_text_and_unlocked_pdf(file_bytes: bytes, passwords: list[str]) -> tu
         except Exception:
             continue
 
-    # Если не удалось снять защиту — пробуем открыть как обычный PDF
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         full_text = "\n".join(page.get_text() for page in doc)
@@ -83,7 +82,6 @@ def parse_info(text: str):
 @app.post("/extract-info")
 async def extract_info(file: UploadFile = File(...)):
     contents = await file.read()
-
     passwords = ["1234", "12345", "0000", "1111", ""]
 
     text, unlocked_pdf = extract_text_and_unlocked_pdf(contents, passwords)
@@ -92,12 +90,12 @@ async def extract_info(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Failed to unlock PDF with provided passwords.")
 
     parsed = parse_info(text)
-
     pdf_base64 = base64.b64encode(unlocked_pdf).decode("utf-8")
 
     return {
-    "company": company,
-    "currency": currency,
-    "pdf_base64": pdf_base64,
-    "raw": extracted_text[:1000]  # можно больше, если нужно
-}
+        "company": parsed["company"],
+        "currency": parsed["currency"],
+        "pdf_base64": pdf_base64,
+        "raw": parsed["raw"]
+    }
+
