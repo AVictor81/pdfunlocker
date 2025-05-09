@@ -65,7 +65,7 @@ def parse_info(text: str):
             company_full = name
             company_code = code
 
-    currency_match = re.search(r"Currency\s*[:\-]?\s*([A-Z ]+)", text)
+    currency_match = re.search(r"Currency\s*[:\-]?\s*([A-Za-z ]+)", text)
     if currency_match:
         currency_name = currency_match.group(1).strip().upper()
         currency_code = CURRENCY_MAP.get(currency_name, currency_name)
