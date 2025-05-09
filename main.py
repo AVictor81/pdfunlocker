@@ -1,98 +1,147 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import Response, JSONResponse
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Response
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import pikepdf
 from io import BytesIO
 import re
 import fitz  # PyMuPDF
+import base64
 
-app = FastAPI()
+app = FastAPI(
+    title="PDF Extraction Service",
+    description="API for unlocking PDFs and extracting company and currency information.",
+    version="1.1.0"
+)
 
+# Allow all origins for simplicity (adjust as needed)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mapping of full company names to codes
 COMPANY_MAP = {
     "SOLAR GENERATION POWER LLC": "SG",
     "ECO ENERGY POWER LLC": "Eco",
     "ENERGOEFFECT POWER LLC": "EF",
     "SOLIS POTENTIA HOLDING LLC": "SPH",
-    "TERAWATT POWER LLC": "SPH",
+    "Terawatt power LLC": "SPH"
 }
 
+# Mapping of currency names to ISO codes
 CURRENCY_MAP = {
-    "US DOLLARS": "USD",
     "US DOLLAR": "USD",
+    "US DOLLARS": "USD",
     "EURO": "EUR",
     "UAE DIRHAM": "AED",
     "ARAB EMIRATES DIRHAMS": "AED",
-    "QAR": "QAR",
     "QATARI RIYAL": "QAR",
+    "Amount in QAR": "QAR",
+    "SWISS FRANC": "CHF",
     "SWISS FRANCS": "CHF",
     "CHINESE YUAN RENMINBI": "CNY",
-    "RUSSIAN RUBLES": "RUR",
+    "RUSSIAN RUBLE": "RUR",
+    "RUSSIAN RUBLES": "RUR"
 }
 
-def extract_text_and_pdf_bytes(file_bytes: bytes, passwords: list[str]) -> tuple[str, bytes]:
-    # 1) Пробуем все пароли
-    for pwd in passwords:
+
+def extract_text_and_unlocked_pdf(file_bytes: bytes, passwords: list[str]) -> tuple[str, bytes]:
+    """
+    Attempt to unlock a password-protected PDF using the provided passwords,
+    then extract its text. If none work, try opening it without password.
+    Returns extracted text and the bytes of the (unlocked) PDF.
+    """
+    # Try each password
+    for password in passwords:
         try:
-            with pikepdf.open(BytesIO(file_bytes), password=pwd) as pdf:
-                buf = BytesIO()
-                pdf.save(buf)
-                unlocked = buf.getvalue()
+            with pikepdf.open(BytesIO(file_bytes), password=password) as pdf:
+                out = BytesIO()
+                pdf.save(out)
+                unlocked = out.getvalue()
                 doc = fitz.open(stream=unlocked, filetype="pdf")
-                txt = "\n".join(page.get_text() for page in doc)
+                text = "\n".join(page.get_text() for page in doc)
                 doc.close()
-                return txt, unlocked
+                return text, unlocked
         except Exception:
             continue
 
-    # 2) Открываем «как есть», если ни один пароль не подошёл
+    # Fallback: try without password
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
-        txt = "\n".join(page.get_text() for page in doc)
+        text = "\n".join(page.get_text() for page in doc)
         doc.close()
-        return txt, file_bytes
+        return text, file_bytes
     except Exception:
-        return "", b""
+        return "ERROR: Failed to open PDF with provided passwords", b""
+
 
 def parse_info(text: str) -> dict:
-    best = len(text)
-    company_code = ""
-    currency_code = ""
-    ut = text.upper()
+    """
+    Parse the extracted text to identify the first occurring company and currency.
+    Returns a dict with 'company', 'currency', and a 'raw' text excerpt.
+    """
+    upper = text.upper()
+    best_pos = len(upper)
+    found_company = None
+    for full, code in COMPANY_MAP.items():
+        idx = upper.find(full.upper())
+        if 0 <= idx < best_pos:
+            best_pos = idx
+            found_company = code
 
-    for name, code in COMPANY_MAP.items():
-        idx = ut.find(name)
-        if 0 <= idx < best:
-            best = idx
-            company_code = code
+    currency_match = re.search(r"Currency\s*[:\-]?\s*([A-Za-z ]+)", text)
+    code = None
+    if currency_match:
+        name = currency_match.group(1).strip().upper()
+        code = CURRENCY_MAP.get(name, name)
 
-    m = re.search(r"Currency\s*[:\-]?\s*([A-Za-z ]+)", text, flags=re.IGNORECASE)
-    if m:
-        cur = m.group(1).strip().upper()
-        currency_code = CURRENCY_MAP.get(cur, cur)
+    return {"company": found_company, "currency": code, "raw": text[:500]}
 
-    return {"company": company_code, "currency": currency_code}
 
 @app.post("/extract-info")
 async def extract_info(
     file: UploadFile = File(...),
     passwords: str = Form(None)
 ):
-    fb = await file.read()
+    """
+    Unlock the uploaded PDF (using comma-separated passwords if provided),
+    extract text, parse company and currency, and return results plus
+    Base64-encoded unlocked PDF.
+    """
+    data = await file.read()
     pw_list = [p.strip() for p in passwords.split(",")] if passwords else []
-    text, _ = extract_text_and_pdf_bytes(fb, pw_list)
-    if not text:
-        raise HTTPException(status_code=400, detail="Не удалось открыть PDF")
-    info = parse_info(text)
-    return JSONResponse(status_code=200, content=info)
+    txt, pdf_bytes = extract_text_and_unlocked_pdf(data, pw_list)
+    if txt.startswith("ERROR:"):
+        return JSONResponse(status_code=400, content={"error": txt})
+
+    info = parse_info(txt)
+    return {
+        "company": info["company"],
+        "currency": info["currency"],
+        "raw": info["raw"],
+        "pdf_base64": base64.b64encode(pdf_bytes).decode("utf-8")
+    }
+
 
 @app.post("/extract-pdf")
 async def extract_pdf(
     file: UploadFile = File(...),
     passwords: str = Form(None)
 ):
-    fb = await file.read()
+    """
+    Unlock the uploaded PDF using provided passwords and return the
+    unlocked PDF as an application/pdf response for download.
+    """
+    data = await file.read()
     pw_list = [p.strip() for p in passwords.split(",")] if passwords else []
-    _, pdf_bytes = extract_text_and_pdf_bytes(fb, pw_list)
-    if not pdf_bytes:
-        raise HTTPException(status_code=400, detail="Не удалось открыть PDF")
-    return Response(content=pdf_bytes, media_type="application/pdf")
+    txt, pdf_bytes = extract_text_and_unlocked_pdf(data, pw_list)
+    if txt.startswith("ERROR:"):
+        raise HTTPException(status_code=400, detail=txt)
 
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=unlocked.pdf"}
+    )
