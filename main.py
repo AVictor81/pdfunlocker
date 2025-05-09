@@ -1,5 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import Response, JSONResponse
 import pikepdf
 from io import BytesIO
 import re
@@ -7,94 +7,95 @@ import fitz  # PyMuPDF
 
 app = FastAPI()
 
-# Справочник компаний → код
+# Словарь соответствия компаний и сокращений
 COMPANY_MAP = {
     "SOLAR GENERATION POWER LLC": "SG",
     "ECO ENERGY POWER LLC": "Eco",
     "ENERGOEFFECT POWER LLC": "EF",
     "SOLIS POTENTIA HOLDING LLC": "SPH",
-    "TERAWATT POWER LLC": "SPH"
+    "TERAWATT POWER LLC": "SPH",
 }
 
-# Справочник валют → код
+# Словарь соответствия валют
 CURRENCY_MAP = {
     "US DOLLARS": "USD",
     "US DOLLAR": "USD",
     "EURO": "EUR",
     "UAE DIRHAM": "AED",
     "ARAB EMIRATES DIRHAMS": "AED",
-    "QATARI RIYAL": "QAR",
     "QAR": "QAR",
+    "QATARI RIYAL": "QAR",
     "SWISS FRANCS": "CHF",
     "CHINESE YUAN RENMINBI": "CNY",
-    "RUSSIAN RUBLES": "RUR"
+    "RUSSIAN RUBLES": "RUR",
 }
 
-def extract_text_and_pdf(input_bytes: bytes, passwords: list[str]) -> tuple[str, bytes]:
-    # Попытка открыть PDF с каждым паролем
+def extract_text_and_pdf_bytes(file_bytes: bytes, passwords: list[str]) -> tuple[str, bytes]:
+    # 1) Пробуем все пароли
     for pwd in passwords:
         try:
-            with pikepdf.open(BytesIO(input_bytes), password=pwd) as pdf:
-                tmp = BytesIO()
-                pdf.save(tmp)
-                data = tmp.getvalue()
-                # Достаём текст из разблокированного
-                doc = fitz.open(stream=data, filetype="pdf")
-                text = "\n".join(page.get_text() for page in doc)
+            with pikepdf.open(BytesIO(file_bytes), password=pwd) as pdf:
+                buf = BytesIO()
+                pdf.save(buf)
+                unlocked = buf.getvalue()
+                doc = fitz.open(stream=unlocked, filetype="pdf")
+                txt = "\n".join(page.get_text() for page in doc)
                 doc.close()
-                return text, data
+                return txt, unlocked
         except Exception:
             continue
-    # Если пароли не подошли — без пароля
-    try:
-        doc = fitz.open(stream=input_bytes, filetype="pdf")
-        text = "\n".join(page.get_text() for page in doc)
-        doc.close()
-        return text, input_bytes
-    except Exception:
-        return "ERROR: cannot open PDF", b""
 
-def parse_codes(text: str) -> tuple[str, str]:
-    up = text.upper()
-    best_pos = len(text)
-    comp_code = ""
-    # Ищем компанию по первому вхождению
+    # 2) Если ни один пароль не подошёл — открываем «как есть»
+    try:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        txt = "\n".join(page.get_text() for page in doc)
+        doc.close()
+        return txt, file_bytes
+    except Exception:
+        return "", b""
+
+def parse_info(text: str) -> dict:
+    best = len(text)
+    company_code = currency_code = None
+    ut = text.upper()
+
     for name, code in COMPANY_MAP.items():
-        idx = up.find(name)
-        if 0 <= idx < best_pos:
-            best_pos = idx
-            comp_code = code
-    # Ищем валюту
-    m = re.search(r"Currency\s*[:\-]?\s*([A-Za-z ]+)", text, re.IGNORECASE)
-    cur_code = ""
+        idx = ut.find(name)
+        if 0 <= idx < best:
+            best = idx
+            company_code = code
+
+    m = re.search(r"Currency\s*[:\-]?\s*([A-Za-z ]+)", text, flags=re.IGNORECASE)
     if m:
-        nm = m.group(1).strip().upper()
-        cur_code = CURRENCY_MAP.get(nm, nm)
-    return comp_code, cur_code
+        cur = m.group(1).strip().upper()
+        currency_code = CURRENCY_MAP.get(cur, cur)
+
+    return {
+        "company": company_code or "",
+        "currency": currency_code or "",
+    }
 
 @app.post("/extract-info")
 async def extract_info(
     file: UploadFile = File(...),
     passwords: str = Form(None)
 ):
-    file_bytes = await file.read()
+    fb = await file.read()
     pw_list = [p.strip() for p in passwords.split(",")] if passwords else []
-    text, pdf_bytes = extract_text_and_pdf(file_bytes, pw_list)
 
-    if text.startswith("ERROR:"):
-        raise HTTPException(status_code=400, detail=text)
+    text, pdf_bytes = extract_text_and_pdf_bytes(fb, pw_list)
+    if not pdf_bytes:
+        return JSONResponse(status_code=400, content={"error": "Failed to open PDF with provided passwords."})
 
-    comp, cur = parse_codes(text)
+    info = parse_info(text)
 
-    # Формируем заголовки, из которых Make возьмёт метаданные
-    headers = {
-        "Content-Disposition": f'attachment; filename="{comp}_{cur}.pdf"',
-        "X-Company-Code": comp,
-        "X-Currency-Code": cur
-    }
-    return StreamingResponse(
-        BytesIO(pdf_bytes),
+    # Возвращаем распароленный PDF вместе с нужными заголовками
+    return Response(
+        content=pdf_bytes,
         media_type="application/pdf",
-        headers=headers
+        headers={
+            "x-company-code": info["company"],
+            "x-currency-code": info["currency"],
+        }
     )
 
