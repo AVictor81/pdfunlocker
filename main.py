@@ -18,7 +18,7 @@ COMPANY_MAP = {
 # Словарь соответствия валют
 CURRENCY_MAP = {
     "US DOLLARS": "USD",
-    "US Dollar": "USD",
+    "US DOLLAR": "USD",
     "EURO": "EUR",
     "UAE DIRHAM": "AED",
     "ARAB EMIRATES DIRHAMS": "AED",
@@ -56,9 +56,10 @@ def extract_text_from_pdf(file_bytes: bytes, passwords: list[str]) -> str:
 def parse_info(text: str):
     company_full = company_code = currency_code = None
     best_position = len(text)
+    upper_text = text.upper()
 
     for name, code in COMPANY_MAP.items():
-        pos = text.find(name)
+        pos = upper_text.find(name.upper())
         if 0 <= pos < best_position:
             best_position = pos
             company_full = name
@@ -66,7 +67,7 @@ def parse_info(text: str):
 
     currency_match = re.search(r"Currency\s*[:\-]?\s*([A-Z ]+)", text)
     if currency_match:
-        currency_name = currency_match.group(1).strip()
+        currency_name = currency_match.group(1).strip().upper()
         currency_code = CURRENCY_MAP.get(currency_name, currency_name)
 
     return {
