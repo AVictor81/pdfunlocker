@@ -78,14 +78,37 @@ def parse_info(text: str):
 
 
 @app.post("/extract-info")
-async def extract_info(file: UploadFile = File(...), passwords: str = Form(None)):
-    file_bytes = await file.read()
-    password_list = [p.strip() for p in passwords.split(",")] if passwords else []
-    text, unlocked_pdf = extract_text_and_unlocked_pdf(file_bytes, password_list)
+async def extract_info(file: UploadFile = File(...)):
 
-    if text.startswith("ERROR:"):
-        return JSONResponse(status_code=400, content={"error": text})
+    contents = await file.read()
 
-    info = parse_info(text)
-    info["pdf"] = base64.b64encode(unlocked_pdf).decode("utf-8")
-    return info
+    # Пароли, которые пробуем
+    passwords = ["1234", "12345", "0000", "1111", ""]
+
+    extracted_text = None
+    decrypted_pdf_bytes = None
+
+    for password in passwords:
+        try:
+            decrypted_pdf_bytes = unlock_pdf_from_bytes(contents, password)
+            if decrypted_pdf_bytes:
+                extracted_text = extract_text_from_pdf(decrypted_pdf_bytes)
+                break
+        except Exception as e:
+            continue
+
+    if not decrypted_pdf_bytes:
+        raise HTTPException(status_code=400, detail="Failed to unlock PDF with known passwords.")
+
+    # Извлекаем company и currency
+    company = extract_company(extracted_text)
+    currency = extract_currency(extracted_text)
+
+    # Конвертируем PDF в base64
+    pdf_base64 = base64.b64encode(decrypted_pdf_bytes).decode('utf-8')
+
+    return {
+        "company": company,
+        "currency": currency,
+        "pdf_base64": pdf_base64
+    }
