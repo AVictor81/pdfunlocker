@@ -18,11 +18,13 @@ COMPANY_MAP = {
 # Словарь соответствия валют
 CURRENCY_MAP = {
     "US DOLLARS": "USD",
+    "US Dollar": "USD",
     "EURO": "EUR",
     "UAE DIRHAM": "AED",
     "ARAB EMIRATES DIRHAMS": "AED",
     "QATARI RIYAL": "QAR",
     "SWISS FRANCS": "CHF",
+    "CHINESE YUAN RENMINBI": "CNY",
     "RUSSIAN RUBLES": "RUR"
 }
 
