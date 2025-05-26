@@ -65,7 +65,8 @@ def extract_text_and_unlocked_pdf(file_bytes: bytes, passwords: list[str]) -> tu
                 text = "\n".join(page.get_text() for page in doc)
                 doc.close()
                 return text, unlocked
-        except Exception:
+        except Exception as e:
+            print(f"[Password failed] '{password}': {e}")
             continue
 
     # Fallback: try without password
@@ -74,8 +75,10 @@ def extract_text_and_unlocked_pdf(file_bytes: bytes, passwords: list[str]) -> tu
         text = "\n".join(page.get_text() for page in doc)
         doc.close()
         return text, file_bytes
-    except Exception:
+    except Exception as e:
+        print(f"[Fallback open failed] No password worked. Error: {e}")
         raise ValueError("Failed to open PDF with provided passwords")
+
 
 
 def parse_info(text: str) -> dict:
@@ -112,6 +115,9 @@ async def extract_info(
     Base64-encoded unlocked PDF.
     """
     data = await file.read()
+    print(f"==> Got file: {file.filename}")
+    print(f"==> Received passwords: {passwords}")
+
     pw_list = [p.strip() for p in passwords.split(",")] if passwords else []
     try:
         txt, pdf_bytes = extract_text_and_unlocked_pdf(data, pw_list)
