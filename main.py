@@ -75,7 +75,7 @@ def extract_text_and_unlocked_pdf(file_bytes: bytes, passwords: list[str]) -> tu
         doc.close()
         return text, file_bytes
     except Exception:
-        return "ERROR: Failed to open PDF with provided passwords", b""
+        raise ValueError("Failed to open PDF with provided passwords")
 
 
 def parse_info(text: str) -> dict:
@@ -113,9 +113,10 @@ async def extract_info(
     """
     data = await file.read()
     pw_list = [p.strip() for p in passwords.split(",")] if passwords else []
-    txt, pdf_bytes = extract_text_and_unlocked_pdf(data, pw_list)
-    if txt.startswith("ERROR:"):
-        return JSONResponse(status_code=400, content={"error": txt})
+    try:
+        txt, pdf_bytes = extract_text_and_unlocked_pdf(data, pw_list)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
 
     info = parse_info(txt)
     return {
